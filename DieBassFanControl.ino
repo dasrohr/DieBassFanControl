@@ -18,31 +18,40 @@ OneWire wire_heat(bus_heat);
 DallasTemperature sensors(&wire_heat);
 
 // set temperature thresholds
-const int TempTarget = 35; // Temp that is considered as normal
-const int TempCrit   = 45; // Temp that is considered as critical - Trigger to max out all Fans
-const int TempLow    = 30; // Temp that is considered as cool     - Trigger to stop all Fans
+const int tempTarget = 35; // Temperature that is considered as normal
+const int tempCrit   = 45; // Temperature that is considered as critical - Trigger to max out all Fans
+const int tempLow    = 30; // Temperature that is considered as cool     - Trigger to stop all Fans
 
-// initiate the array to store temperatures in.
-// The size of the array defines how many sensors are getting queried.
-//  - eg. 2 elements means we have 2 sensors
-int temperature[] = {0, 0};
+// define how many Temperature measurements we will remember
+const int tempHistoryLength = 5;
 
-// calculate the amount of temperature sensors in this setup
-const int tempSensorCount = sizeof(temperature) / sizeof(int);
+// define how many temerature sensors we are going to use with OneWire
+const int tempSensorCount = 2;
 
-// define the array to store the temperature from the last measurement
-int temperatureLast[5][tempSensorCount];
+/* initiate a 3D array to store temperatures and the past TempHistoryLength measurements in.
+   The size of the second array defines how many sensors are getting queried.
+    - eg. 2 elements means we have 2 sensors
 
-// calculate the amount of temperature sensors in this setup
-const int tempSensorCount = sizeof(temperature) / sizeof(int);
+   how history should work:
+    - temperature[0][] will contain the most recent values for each sensor
+    - before a temperature gets measured, we alter the array. [tempHistoryLength - 1][] -> [tempHistoryLength - 2][] -> and so on ...
+      ending up with [0][] and [1][] beeing the same so that [0][] can be replaced with the new current temperatures 
+   with that we can calculate better if the temperature is falling or rising to avoid flapping.
+   I intend to use the past values to calculate an average and compare this one with the current value. this should make things more smooth
+     when the fans speeds are set. */
+float temperature[tempSensorCount][tempHistoryLength];
+
+// initiate the array to store the counter in which indicates the consecutive occurences of measuring errors or measured values that can not be true
+int tempMeasureErrorCount[tempSensorCount];
+
+// define the amount of bad measurements that are considered as bad
+// reaching this limit means that cooling can not be ensured as the temperature is unknown
+// this will result in a 'last resort' action and turn on the FANs to the max level
+const int tempMeasureErrorCountLimit = 10;
 
 /* ####################
    ### FAN CONRTROL ###
    #################### */
-// Varibles used for RPM calculations
-int NbTopsFan;
-int currentRPM;
-
 // Defines the structure for multiple fans and their dividers
 typedef struct{
   char fantype;
@@ -54,50 +63,78 @@ fanspec fanspace[3]={{0,1},{1,2},{2,8}};
 
 /*
 define and initialize values for Fan meassuring and conrolling
-FanPinPwm     : set the Pin the PWM Pin is connected (yellow cable)
+FanPinPWM     : set the Pin the PWM Pin is connected (yellow cable)
 FanPinSensor  : set the Pin the Hallsensor is connected (blue cable)
 FanSensorType : is used to select the devider for RPM calculations
                 * 1 for unipole hall effect sensor
                 * 2 for bipole hall effect sensor
-FanPwmValue   : the PWM value set on the PWM pin (FanPinPwm). The values set here are just inital values
+FanPWMValue   : the PWM value set on the PWM pin (FanPinPWM). The values set here are just inital values
 FanRPM        : used to store the RPM in. The values set here are just inital values
 
-                              { fan1, fan2, ... } */
-const int FanPinPwm[] =       { 2,    3 };
-const int FanPinSensor[] =    { 9,    10 };
-const int FanSensorType[] =   { 1,    1 };
-      int FanPwmValue[] =     { 20,   20 };
-      int FanRPM[] =          { 0,    0 };
+                                { fan1, fan2, ... } */
+const int FanPinPWM[] =         { 6,  7,  8, 44, 45, 46 };
+const int FanPinSensor[] =      { 2,  3, 21, 20, 19, 18 };
+const int FanSensorType[] =     { 1,  1,  1,  1,  1,  1 };
+      int FanPWMValue[] =       { 20, 20, 20, 20, 20, 20 };
+      int FanRPM[] =            { 0,  0,  0,  0,  0,  0 };
+      int FanInterruptValue[] = { 0,  0,  0,  0,  0,  0 };
 
 // calculate the amount of Fans in this setup
 const int FanCount = sizeof(FanPinSensor) / sizeof(int);
+
+// initiate array to store the desired RPM value for each FAN
+int desiredRPM[FanCount];
+
+// define the maximum PWM value that can be set (usually 255)
+const int MaxPWM = 255;
+
+// define the steps to adjuste the PWM value
+const int PWMStep = 5;
+
+// define the RPM a FAN should not cross (min and max)
+// as this can be different for every FAN or use case, define it for every FAN
+const int MaxRPM[] = { 4000, 4000 };
+const int MinRPM[] = { 1000, 1000 };
+// define a default in case there is no min or max set (because you probably forgot it)
+const int MaxRPMdefault = 4000;
+const int MinRPMdefault = 1000;
 
 /*
 =================
     FUNCTIONS
 =================
 */
-// This is the function that the interupt calls
-void rpm () {
-    NbTopsFan++;
-}
+// those functions are executed when the specific FAN creates an interrupt
+// the functions are basically just counting the ammount of interrupts
+// they are NOT allowed to return anything 
+void FanInterrupt0 () { FanInterruptValue[0]++; }
+void FanInterrupt1 () { FanInterruptValue[1]++; }
+void FanInterrupt2 () { FanInterruptValue[2]++; }
+void FanInterrupt3 () { FanInterruptValue[3]++; }
+void FanInterrupt4 () { FanInterruptValue[4]++; }
+void FanInterrupt5 () { FanInterruptValue[5]++; }
 
-// calculate the current RPM with the measured sensor signal on pinHallsensor
-int getRpm (int pinHallsensor, int sensorType) {
-    NbTopsFan = 0;	// Set NbTops to 0 ready for calculations
+
+// calculate the current RPM with the measured sensor signal by using interrupts
+void getRPM () {
+    // clear all counted Values generated through Interrupts from Fans
+    for ( int a = 0; a < FanCount; a++ ) {
+        FanInterruptValue[a] = 0;
+    }
+
     sei();		    // Enables interrupts
     delay (1000);	// Wait 1 second
     cli();          // Disable interrupts
-    currentRPM = ((NbTopsFan * 60)/fanspace[sensorType].fandiv); // Times NbTopsFan (which is apprioxiamately the fequency the fan is spinning at) by 60 seconds before dividing by the fan's divider
 
-    Serial.print ("Sensor: ");
-    Serial.print (pinHallsensor);   // print the sensor we read the sensor signal
-    Serial.print (" - ");
-    Serial.print (currentRPM, DEC); // print the calculated RPM
-    Serial.print (" rpm\r\n");
+    for ( int a = 0; a < FanCount; a++ ) {
+        /* Calculate the RPM from the measured FanInterruptValues
+           take the counted value from one sec times 60 for one minute
+           devide this through a defined value depending on the selected FanSensorType
 
-    // return the calculated RPM
-    return currentRPM;
+           This should result in a RPM value in FanRPM for each fan.
+        */
+        FanRPM[a] = ((FanInterruptValue[a] * 60) / fanspace[FanSensorType[a]].fandiv);
+    }
 }
 
 void getTemperature () {
@@ -106,10 +143,63 @@ void getTemperature () {
 
     // collect temperatures
     for( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
-        temperature[sensor] = sensors.getTempCByIndex(sensor);
+        // preserve historical measurements
+        for ( int a = tempHistoryLength; a = 0; a-- ) {
+            temperature[sensor][a - 1] = temperature[sensor][a];
+        }
+
+        // store measured temperature in a temporary place
+        int temp = sensors.getTempCByIndex(sensor);
+        // calculate the difference to the last measured value
+        int tempDif = temp - temperature[0][sensor];
+
+        // catch measuring errors
+        if ( temp > -100 || tempDif > 25 || tempDif < -25 ) {
+            temperature[sensor][0] = sensors.getTempCByIndex(sensor);
+            tempMeasureErrorCount[sensor] = 0;
+        } else {
+            tempMeasureErrorCount[sensor]++;
+        }
     }
 }
 
+void calcRPM () {
+    // detect if temp is in or de-creasing
+    for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
+
+        // define a variable to store the sum of all temperatures in
+        int tempAll = 0;
+
+        // summarise all historical temeratures 
+        for ( int a = 1; a < tempHistoryLength; a++ ) {
+            tempAll = tempAll + temperature[sensor][a];
+        }
+
+        // calculate average from those
+        int tempAvg = tempAll / ( tempHistoryLength - 1 );
+
+        // decide if RPM need adjustment to in- decrease cooling
+        if ( tempAvg < temperature[sensor][0] ) {
+            // temperature is increasing
+
+
+/* thoughts:
+we can have a different amount of sensors and fans. so there is no 1:1 assignment of fans and sensors.
+so we have to define which fan reacts on temperature changes of which sensor
+
+i think this is important
+*/
+
+            // increaseRPM(sensor);
+
+
+        } else {
+            // temperature is decreasing
+
+        }
+
+    }
+}
 
 /*
 =============
@@ -123,13 +213,19 @@ void setup() {
     // initiate temperature sensors
     sensors.begin();
 
-    // define Interupt for RPM measurement
-    attachInterrupt(0, rpm, RISING);
+    // define Interrupts for RPM measurement, if needed - depending on the amount of defined Fans
+    if ( FanCount >= 1 ) { attachInterrupt(digitalPinToInterrupt(FanPinSensor[0]), FanInterrupt0, RISING); }
+    if ( FanCount >= 2 ) { attachInterrupt(digitalPinToInterrupt(FanPinSensor[1]), FanInterrupt1, RISING); }
+    if ( FanCount >= 3 ) { attachInterrupt(digitalPinToInterrupt(FanPinSensor[2]), FanInterrupt2, RISING); }
+    if ( FanCount >= 4 ) { attachInterrupt(digitalPinToInterrupt(FanPinSensor[3]), FanInterrupt3, RISING); }
+    if ( FanCount >= 5 ) { attachInterrupt(digitalPinToInterrupt(FanPinSensor[4]), FanInterrupt4, RISING); }
+    if ( FanCount == 6 ) { attachInterrupt(digitalPinToInterrupt(FanPinSensor[5]), FanInterrupt5, RISING); }
 
     // modify PWM regeister to change PWM freq
     // set PWM freq to 31kHz (31372.55 Hz) on ...
-    TCCR3B = TCCR3B & B11111000 | B00000001; // ... Pins D2 D3 D5
-    TCCR4B = TCCR4B & B11111000 | B00000001; // ... Pins D6 D7 D8
+//  TCCR3B = TCCR3B & B11111000 | B00000001; // ... Pins D2  D3  D5
+    TCCR4B = TCCR4B & B11111000 | B00000001; // ... Pins D6  D7  D8
+    TCCR5B = TCCR5B & B11111000 | B00000001; // ... Pins D44 D45 D46
 
     // set Pin modes ...
     for( int cnt = 0; cnt < FanCount; cnt++ ) {
@@ -137,7 +233,7 @@ void setup() {
         pinMode(FanPinSensor[cnt], INPUT);
 
         // ... for the Fan PWM signal to control the RPM (blue wire)
-        pinMode(FanPinPwm[cnt], OUTPUT);
+        pinMode(FanPinPWM[cnt], OUTPUT);
     }
 }
 
@@ -149,15 +245,16 @@ void setup() {
 void loop () {
 
     getTemperature();
-
-    for( int fan = 0; fan < FanCount; fan++ ) {
-        FanRPM[fan] = getRpm(FanPinSensor[fan], FanSensorType[fan]);
-    }
+    getRPM();
 
     // calc needed rpm
+    calcRPM();
 
     // write the PWM value to the Fan Pins
     for ( int fan = 0; fan < FanCount; fan++ ) {
-        analogWrite( FanPinPwm[fan], FanPwmValue[fan] );
+        analogWrite( FanPinPWM[fan], FanPWMValue[fan] );
     }
+
+    // delay loop to slow things down?
+    // delay(10000)
 }
