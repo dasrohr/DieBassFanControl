@@ -69,35 +69,23 @@ FanSensorType : is used to select the devider for RPM calculations
                 * 1 for unipole hall effect sensor
                 * 2 for bipole hall effect sensor
 FanPWMValue   : the PWM value set on the PWM pin (FanPinPWM). The values set here are just inital values
-FanRPM        : used to store the RPM in. The values set here are just inital values
 
                                 { fan1, fan2, ... } */
 const int FanPinPWM[] =         { 6,  7,  8, 44, 45, 46 };
 const int FanPinSensor[] =      { 2,  3, 21, 20, 19, 18 };
 const int FanSensorType[] =     { 1,  1,  1,  1,  1,  1 };
       int FanPWMValue[] =       { 20, 20, 20, 20, 20, 20 };
-      int FanRPM[] =            { 0,  0,  0,  0,  0,  0 };
-      int FanInterruptValue[] = { 0,  0,  0,  0,  0,  0 };
 
 // calculate the amount of Fans in this setup
 const int FanCount = sizeof(FanPinSensor) / sizeof(int);
 
-// initiate array to store the desired RPM value for each FAN
-int desiredRPM[FanCount];
-
 // define the maximum PWM value that can be set (usually 255)
 const int MaxPWM = 255;
+// define the minimum PWM value that can be set
+const int MinPWM = 15;
 
 // define the steps to adjuste the PWM value
 const int PWMStep = 5;
-
-// define the RPM a FAN should not cross (min and max)
-// as this can be different for every FAN or use case, define it for every FAN
-const int MaxRPM[] = { 4000, 4000 };
-const int MinRPM[] = { 1000, 1000 };
-// define a default in case there is no min or max set (because you probably forgot it)
-const int MaxRPMdefault = 4000;
-const int MinRPMdefault = 1000;
 
 /*
 =================
@@ -114,28 +102,6 @@ void FanInterrupt3 () { FanInterruptValue[3]++; }
 void FanInterrupt4 () { FanInterruptValue[4]++; }
 void FanInterrupt5 () { FanInterruptValue[5]++; }
 
-
-// calculate the current RPM with the measured sensor signal by using interrupts
-void getRPM () {
-    // clear all counted Values generated through Interrupts from Fans
-    for ( int a = 0; a < FanCount; a++ ) {
-        FanInterruptValue[a] = 0;
-    }
-
-    sei();		    // Enables interrupts
-    delay (1000);	// Wait 1 second
-    cli();          // Disable interrupts
-
-    for ( int a = 0; a < FanCount; a++ ) {
-        /* Calculate the RPM from the measured FanInterruptValues
-           take the counted value from one sec times 60 for one minute
-           devide this through a defined value depending on the selected FanSensorType
-
-           This should result in a RPM value in FanRPM for each fan.
-        */
-        FanRPM[a] = ((FanInterruptValue[a] * 60) / fanspace[FanSensorType[a]].fandiv);
-    }
-}
 
 void getTemperature () {
     // Send the command to get temperatures
@@ -163,7 +129,7 @@ void getTemperature () {
     }
 }
 
-void calcRPM () {
+void calcPWM () {
     // detect if temp is in or de-creasing
     for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
 
@@ -245,10 +211,9 @@ void setup() {
 void loop () {
 
     getTemperature();
-    getRPM();
 
-    // calc needed rpm
-    calcRPM();
+    // calc the new PWM values based on tmerature changes
+    calcPWM();
 
     // write the PWM value to the Fan Pins
     for ( int fan = 0; fan < FanCount; fan++ ) {
