@@ -7,6 +7,8 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 
+#define DEBUG
+
 /* ###################
    ### TEMPERATURE ###
    ################### */
@@ -102,20 +104,69 @@ const int PWMStep = 25;
     FUNCTIONS
 =================
 */
+bool temperatureInitialize () {
+    // Send the command to get temperatures
+    sensors.requestTemperatures();
+
+    // define a bool which will be the return vaule of this function
+    // it true by default and gets set to false when ANY inital sensor reading fails to inform the setup function of it. 
+    bool checkState = true;
+
+    // collect temperatures
+    for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
+
+        int x = 0;
+        bool SensorCheckOK = false;
+        while ( !SensorCheckOK && x < 5 ) {
+            // store measured temperature in a temporary place
+            int tempMeasured = (int)sensors.getTempCByIndex(sensor);
+
+            // catch measuring errors
+            if ( tempMeasured > -100 ) {
+                for ( int a = 0; a < tempHistoryLength; a++ ) {
+                    temperature[sensor][a] = tempMeasured;
+                }
+                SensorCheckOK = true;
+                #ifdef DEBUG
+                    Serial.print("init sensor ");
+                    Serial.print(sensor);
+                    Serial.print(" OK - ");
+                    Serial.println(tempMeasured);
+                #endif
+            } else {
+                x++;
+                #ifdef DEBUG
+                    Serial.print("init sensor ");
+                    Serial.print(sensor);
+                    Serial.print(" FAIL (cnt ");
+                    Serial.print(x);
+                    Serial.print(" ) - ");
+                    Serial.println(tempMeasured);
+                #endif
+            }
+            // set the bool to false to notify the setup function that a sensor has a failure during init
+            if ( x = 5 ) { checkState = false; }
+        }
+    }
+    // returns false if
+    return checkState;
+}
+
+
 void getTemperature () {
     // Send the command to get temperatures
     sensors.requestTemperatures();
 
     // preserve historical measurements
-    for ( int a = 0; a < tempSensorCount; a++ ) {
-        for ( int b = tempHistoryLength; b = 0; b-- ) {
-            temperature[a][b - 1] = temperature[a][b];
+    for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
+        for ( int b = tempHistoryLength - 1; b >= 1; b-- ) {
+            temperature[sensor][b] = temperature[sensor][b - 1];
         }
     }
 
-    // define a Variable to store the highest measured Temperature
+    // clear Variable to store the highest measured Temperature
     // this serves as value to check if we hit any thresholds
-    int tempMeasuredMax = 0;
+    tempMeasuredMax = 0;
 
     // collect temperatures
     for( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
@@ -126,6 +177,10 @@ void getTemperature () {
         // check if we have a new measuredMax temperature
         if ( tempMeasuredMax < tempMeasured ) {
             tempMeasuredMax = tempMeasured;
+            #ifdef DEBUG
+                Serial.print("new measured max: ");
+                Serial.println(tempMeasuredMax);
+            #endif
         }
 
         // calculate the difference to the last measured value
@@ -138,6 +193,13 @@ void getTemperature () {
         } else {
             tempMeasureErrorCount[sensor]++;
         }
+
+        #ifdef DEBUG
+            Serial.print("temp measured on ");
+            Serial.print(sensor);
+            Serial.print(" ");
+            Serial.println(tempMeasured);
+        #endif
     }
 }
 
@@ -176,16 +238,20 @@ void adjustPWM(bool increase) {
     for ( int b = 0; b < FanZoneCount; b++ ) {
         if ( increase ) {
             FanZonePWMValue[b] = FanZonePWMValue[b] + PWMStep;
-            Serial.print("+ pwn in zone ");
-            Serial.print(b);
-            Serial.print(" to ");
-            Serial.println(FanZonePWMValue[b]);
+            #ifdef DEBUG
+                Serial.print("+ pwn in zone ");
+                Serial.print(b);
+                Serial.print(" to ");
+                Serial.println(FanZonePWMValue[b]);
+            #endif
         } else {
             FanZonePWMValue[b] = FanZonePWMValue[b] - PWMStep;
-            Serial.print("- pwn in zone ");
-            Serial.print(b);
-            Serial.print(" to ");
-            Serial.println(FanZonePWMValue[b]);
+            #ifdef DEBUG
+                Serial.print("- pwn in zone ");
+                Serial.print(b);
+                Serial.print(" to ");
+                Serial.println(FanZonePWMValue[b]);
+            #endif
         }
 
         // check if the new PWM Value meets the Min/Max
@@ -204,12 +270,16 @@ void checkThresholds () {
     // tempertature under threshold, power off zone 1 if running
     if ( tempMeasuredMax >= tempZone1 && FanZonePWMValue[0] < MinPWM ) {
         FanZonePWMValue[0] = MinPWM;
-        Serial.print("power on: zone 1 - temp: ");
-        Serial.println(tempMeasuredMax);
+        #ifdef DEBUG
+            Serial.print("power on: zone 1 - temp: ");
+            Serial.println(tempMeasuredMax);
+        #endif
     } else if ( tempMeasuredMax < tempZone1 && FanZonePWMValue[0] > 0 ) {
-        Serial.print("power off: zone 1 - temp: ");
-        Serial.println(tempMeasuredMax);
         FanZonePWMValue[0] = 0;
+        #ifdef DEBUG
+            Serial.print("power off: zone 1 - temp: ");
+            Serial.println(tempMeasuredMax);
+        #endif
     }
 
     // check for zone 2
@@ -218,11 +288,15 @@ void checkThresholds () {
     // temperatrue under threshold, power off zone 2 if running
     if ( tempMeasuredMax >= tempZone2 && FanZonePWMValue[1] < MinPWM ) {
         FanZonePWMValue[1] = MinPWM;
-        Serial.print("power on: zone 2 - temp: ");
-        Serial.println(tempMeasuredMax);
+        #ifdef DEBUG
+            Serial.print("power on: zone 2 - temp: ");
+            Serial.println(tempMeasuredMax);
+        #endif
     } else if ( tempMeasuredMax < tempZone2 && FanZonePWMValue[1] > 0) {
-        Serial.print("power off: zone 2 - temp: ");
-        Serial.println(tempMeasuredMax);
+        #ifdef DEBUG
+            Serial.print("power off: zone 2 - temp: ");
+            Serial.println(tempMeasuredMax);
+        #endif
         FanZonePWMValue[1] = 0;
     }
 
@@ -234,11 +308,15 @@ void checkThresholds () {
         for ( int a = 0; a > FanZoneCount; a++ ) {
             FanZonePWMValue[a] = MaxPWM;
         }
-        Serial.print("power on: zone 3 - temp: ");
-        Serial.println(tempMeasuredMax);
+        #ifdef DEBUG    
+            Serial.print("power on: zone 3 - temp: ");
+            Serial.println(tempMeasuredMax);
+        #endif
     } else if ( tempMeasuredMax < tempZone3 && FanZonePWMValue > 0 ) {
-        Serial.print("power off: zone 3 - temp: ");
-        Serial.println(tempMeasuredMax);
+        #ifdef DEBUG
+            Serial.print("power off: zone 3 - temp: ");
+            Serial.println(tempMeasuredMax);
+        #endif
         FanZonePWMValue[2] = 0;
     }
 }
@@ -258,16 +336,20 @@ void checkError() {
     if ( hasError ) {
         // turn on onboard led to show this state externaly
         digitalWrite(LED_BUILTIN, HIGH);
-        Serial.print("error count ");
-        for ( int a = 0; a < tempSensorCount; a++ ) {
-            Serial.print(tempMeasureErrorCount[a]);
-            Serial.print(" ");
-        }
-        Serial.println();
+        #ifdef DEBUG
+            Serial.print("error count ");
+            for ( int a = 0; a < tempSensorCount; a++ ) {
+                Serial.print(tempMeasureErrorCount[a]);
+                Serial.print(" ");
+            }
+            Serial.println();
+        #endif
     } else {
         // turn off onboard led to show state is ok
         digitalWrite(LED_BUILTIN, LOW);
-        Serial.println("cleared error state");
+        #ifdef DEBUG
+            Serial.println("cleared error state");
+        #endif
     }
 }
 
@@ -275,12 +357,13 @@ void writePWM() {
     // write the PWM value to the Fan Pins
     for ( int zone = 0; zone < FanZoneCount; zone++ ) {
         for ( int fan = 0; fan < FanZoneFanCount[zone]; fan++ ) {
-            analogWrite( FanZonePinPWM[zone][fan], FanZonePWMValue[zone] );
-                        
-            Serial.print("pwm value pin ");
-            Serial.println(FanZonePinPWM[zone][fan]);
-            Serial.print("pwm value ");
-            Serial.println(FanZonePWMValue[zone]);
+            analogWrite( FanZonePinPWM[zone][fan], FanZonePWMValue[zone] );                        
+            #ifdef DEBUG
+                Serial.print("pwm value pin ");
+                Serial.println(FanZonePinPWM[zone][fan]);
+                Serial.print("pwm value ");
+                Serial.println(FanZonePWMValue[zone]);
+            #endif
         }
     }
 }
@@ -291,8 +374,11 @@ void writePWM() {
 =============
 */
 void setup() {
-    // setup Serial
-    Serial.begin(115200);
+    #ifdef DEBUG
+        // setup Serial
+        Serial.begin(9600);
+        Serial.println("SETUP >>>>>");
+    #endif
 
     // count amount of fans in the zones
     for ( int zone = 0; zone < FanZoneCount; zone++ ) {
@@ -317,10 +403,27 @@ void setup() {
     
     // use the internal LED to show active 'last resort' state
     pinMode(LED_BUILTIN, OUTPUT);
-    // brink once during start to show end of setup
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(1000);
+
+    // turn of LED
     digitalWrite(LED_BUILTIN, LOW);
+
+    if ( temperatureInitialize() ) {
+        // temp init successfull
+        // blink at start to show successfull end of setup
+        int state = HIGH; 
+        for( int a = 0; a = 10; a++ ) {
+            digitalWrite(LED_BUILTIN, state);
+            state = state ? LOW: HIGH;
+            delay(1000);
+        }
+    } else {
+        digitalWrite(LED_BUILTIN, HIGH);
+    }
+
+    #ifdef DEBUG
+        Serial.println(">>>>> END");
+    #endif
+
 }
 
 /*
@@ -346,11 +449,47 @@ void loop () {
     // write the pwm values to the pins
     writePWM();
 
-    Serial.print("temperatures: ");
-    Serial.print(temperature[0][0]);
-    Serial.print(" ");
-    Serial.println(temperature[0][1]);
+    #ifdef DEBUG
+        for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
+            Serial.print("temps of sensor ");
+            Serial.print(sensor);
+            Serial.print(" :");
+            for ( int a = 0; a < tempHistoryLength; a++ ) {
+                Serial.print(" ");
+                Serial.print(temperature[sensor][a]);
+            }
+            Serial.println();
+        }
+        Serial.println("==============================================");
+    #endif
 
     // delay loop to slow things down
-    delay(30000);
+    delay(2000);
+
+
+    /*
+    thoughs
+    atm, if the first sensor is raising the pmw because temp is = or +, but sensor 2 temp is - then it reverts the pwm change from sensor 1
+
+    so positive changes to the pwm are not allowed to be overruled.
+
+    remember the pwm values of every zone for ever sensor seperately.
+    after all sensors are processed and the new pwm values are calculated, compare them and find the highest value and set this value to the pins
+    because, if any sensor decides to raise the pwm it means that temperatrue is increasing or stayed equal, but we want it to decrease.
+
+    so any decreased pwm value is bad. unless all sensors decide to reducde pwm value. then it is ok.
+
+    and i think the same goes for the thresholds.
+
+
+    furthermore,
+    there is a logical error in handling the zones ( besides that zones should be renamed to stages )
+
+    rather than overwrite the pwm values when checking the thresholds, it should be checked if an adjustment of the pwm values is neccessary
+     at all. because, if the threshold for stage 1 is not hit, there is no reason to adjust the value.
+     same for all stages besides 3 as this threshold is the critical limit which turns on all fans on max value.
+
+    this still makes it necessary to avoid that the sensors overwrite the decission to raise a pwm value made by the previous one.
+    */
+
 }
