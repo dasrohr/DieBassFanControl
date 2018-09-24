@@ -36,26 +36,16 @@ int temperature[tempSensorCount][tempHistoryLength];
 // initiate the array to store the counter in which indicates the consecutive occurences of measuring errors or measured values that can not be true
 int tempMeasureErrorCount[tempSensorCount] = {};
 
-// define the amount of bad measurements that are considered as bad
-// reaching this limit means that cooling can not be ensured as the temperature is unknown
-// this will result in a 'last resort' action and turn on the FANs to the max level
+// set the amount of reoccuring measurements with bad results
+// a bad result can be either a error (like -127) or a jump in measured temperature higher than 25
 const int tempMeasureErrorCountLimit = 4;
 
-// define the variable to store the highes measured value for every loop
+// define the variable to store the highest measured value for every loop
 int tempMeasuredMax;
 
 /* ####################
    ### FAN CONRTROL ###
    #################### */
-// Defines the structure for multiple fans and their dividers
-typedef struct{
-  char fantype;
-  unsigned int fandiv;
-}fanspec;
-
-// Definitions of the fans
-fanspec fanspace[3]={{0,1},{1,2},{2,8}};
-
 /*
 define and initialize values for Fan meassuring and conrolling
 FanPinPWM     : set the Pin the PWM Pin is connected (yellow cable)
@@ -70,23 +60,13 @@ FanPWMValue   : the PWM value set on the PWM pin (FanPinPWM). The values set her
 
 define 3 Zones. every Zone represent a set of Fans. The Zones are used as Stages to group FANs together.
 Zone 1 might run much earlier than Zone 2 for eg.*/
-const int FanType           = 1;
 const int FanZonePinPWM[3][2] = { { 6, 7 }, { 8, 44 }, { 45, 46 } };
 // const int FanZoneCount      = sizeof(FanZonePinPWM) / sizeof(int);
 const int FanZoneCount      = 3;
-
       int FanZonePWMValue[FanZoneCount];
 
 // define the array to store the amount of fans for every zone in with the fixed length of the amount of zone
 int FanZoneFanCount[FanZoneCount];
-
-
-
-
-// const int FanPinPWM[] =         {  6,  7,  8, 44, 45 };
-// const int FanSensorType[] =     {  1,  1,  1,  1,  1 };
-// const int FanZoneMap[] =        {  0,  0,  1,  1,  2 };
-//       int FanPWMValue[] =       { 20, 20, 20, 20, 20 };
 
 // calculate the amount of Fans in this setup
 // const int FanCount = sizeof(FanPinSensor) / sizeof(int);
