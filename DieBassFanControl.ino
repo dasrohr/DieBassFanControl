@@ -52,9 +52,6 @@ const int stageSetup[][2] = { { 30, 20 }, { 35, 21 }, { 45, 22 }, { 47, 23 } };
 // count the amount of stages. basicaly just for coding conviniece
 const int stageCount = sizeof(stageSetup) / sizeof(stageSetup[0]);
 
-// define the Pin for the LED which gets turned on on case the critial limit (last stage) gets activated
-const int critialLedPin = 10;
-
 // define struct that defines a stage
 struct Stage {
     bool active;
@@ -148,7 +145,6 @@ bool temperatureInitialize () {
             // set the bool to false to notify the setup function that a sensor has a failure during init
             if ( x == 5 ) { checkState = false; }
         }
-
     }
     // returns false if
     return checkState;
@@ -248,28 +244,27 @@ void setup() {
     TCCR5B = TCCR5B & B11111000 | B00000001; // ... Pins D44 D45 D46
 
     // use the internal LED to show active 'last resort' state
-    pinMode(LED_BUILTIN, OUTPUT);
+    pinMode(sensorErrorLimitLed, OUTPUT);
 
     // turn of LED
-    digitalWrite(LED_BUILTIN, LOW);
+    digitalWrite(sensorErrorLimitLed, LOW);
 
     if ( temperatureInitialize() ) {
         // temp init successfull
         // blink at start to show successfull end of setup
         bool state = HIGH;
         for( int a = 0; a < 50; a++ ) {
-            digitalWrite(LED_BUILTIN, state);
+            digitalWrite(sensorErrorLimitLed, state);
             state = state ? LOW: HIGH;
             delay(80);
         }
     } else {
-        digitalWrite(LED_BUILTIN, HIGH);
+        digitalWrite(sensorErrorLimitLed, HIGH);
     }
 
     #ifdef DEBUG
         Serial.println(">>>>>\tEND");
     #endif
-
 }
 
 /*
@@ -278,10 +273,10 @@ void setup() {
 ============
 */
 void loop () {
-
     // get temperatures from sensors
     getTemperature();
 
+    // let the brain do its work
     brain();
 
     // write the pwm values to the pins
