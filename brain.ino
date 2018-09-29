@@ -77,15 +77,16 @@ void brain() {
                         if ( fans[f].pwmValuePri < MinPWM ) { fans[f].pwmValuePri = MinPWM; }   // ensure to not run under the MinPWM value
                         if ( fans[f].pinSec != 0 ) { 
                             // dual Fan setup
-                            if ( fans[f].pwmValuePri = MaxPWM ) {
+                            if ( fans[f].pwmValuePri == MaxPWM ) {
                                 // primary fan is on max, max out too
                                 fans[f].pwmValueSec = MaxPWM;
-                            } else if ( fans[f].pwmValuePri = MinPWM ) {
+                            } else if ( fans[f].pwmValuePri == MinPWM ) {
                                 // primary fan is on min, limit to min
                                 fans[f].pwmValueSec = MinPWM;
                             } else {
                                 // set pwm for sec Fan and preserve the Offset
                                 fans[f].pwmValueSec = fans[f].pwmValuePri - dualFanOffset;
+                                if ( fans[f].pwmValueSec < MinPWM ) { fans[f].pwmValueSec = MinPWM; }
                             }
                         }
                     } else {
