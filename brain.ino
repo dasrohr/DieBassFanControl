@@ -41,11 +41,13 @@ void brain() {
         }
         sensors[s].historyAvg = grandTotal / sensorHistorySize;
         // decide wether the temperature is equal, in- or decreasing
-        if ( sensors[s].historyAvg >= sensors[s].current ) {
+        if ( sensors[s].historyAvg > sensors[s].current ) {
             // temperature is equal or increasing
-            sensors[s].trend = false;   // negative bool means decresing
+            sensors[s].trend = -1;   // negative means decresing
+        } else if ( sensors[s].historyAvg < sensors[s].current ) {
+            sensors[s].trend = 1;    // positive means increasing
         } else {
-            sensors[s].trend = true;    // positive bool means increasing or same
+            sensors[s].trend = 0;    // zero means unchanged
         }
     }
 
@@ -53,7 +55,10 @@ void brain() {
     if ( errorSensorCounter = 0 ) { analogWrite( sensorErrorLimitLed, LOW ); }
 
     // get the global trend of temperature
-    bool trend = getTemperatureTrend();
+    int trend = getTemperatureTrend();
+
+    Serial.print("global trend: ");
+    Serial.println(trend);
 
     // check if stages are active and:
     //  - activate stopped fans
@@ -66,10 +71,10 @@ void brain() {
                 if ( fans[f].stage == st + 1 ){
                     // Fan is mapped to this stage
                     if ( fans[f].active ) {
-                        if ( trend ) {
+                        if ( trend > 0 ) {
                             // trend is true, speed up
                             fans[f].pwmValuePri = fans[f].pwmValuePri + PWMStep;
-                        } else {
+                        } else if ( trend < 0 ) {
                             // trend is false, slow down
                             fans[f].pwmValuePri = fans[f].pwmValuePri - PWMStep;
                         }
@@ -127,11 +132,11 @@ int getHighestTemperature() {
     return a;
 }
 
-bool getTemperatureTrend() {
+int getTemperatureTrend() {
     // check all sensors for trend = true. means temperature is increasing or equal to the historyAvg
-    bool a = false;
-    for ( int s; s < sensorCount; s++ ) {
-        if ( sensors[s].trend ) { a = true; }
+    int a = -1;
+    for ( int s = 0; s < sensorCount; s++ ) {
+        if ( sensors[s].trend > a ) { a = sensors[s].trend; }
     }
     return a;
 }

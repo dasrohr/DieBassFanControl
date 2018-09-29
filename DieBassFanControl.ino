@@ -31,7 +31,7 @@ struct Sensor {
     int history[sensorHistorySize];
     int error;
     int historyAvg;
-    bool trend;
+    int trend;
 };
 // declare the list that stores al sensors
 struct Sensor sensors[sensorCount];
@@ -376,7 +376,7 @@ void setup() {
         sensors[s].current    = 0;
         sensors[s].error      = 0;
         sensors[s].historyAvg = 0;
-        sensors[s].trend      = false;
+        sensors[s].trend      = 0;
         for ( int h = 0; h < sensorHistorySize; h++ ) {
             sensors[s].history[h] = 0;
         }
@@ -408,10 +408,10 @@ void setup() {
         // temp init successfull
         // blink at start to show successfull end of setup
         bool state = HIGH;
-        for( int a = 0; a < 10; a++ ) {
+        for( int a = 0; a < 50; a++ ) {
             digitalWrite(LED_BUILTIN, state);
             state = state ? LOW: HIGH;
-            delay(1000);
+            delay(80);
         }
     } else {
         digitalWrite(LED_BUILTIN, HIGH);
@@ -478,7 +478,7 @@ void loop () {
             Serial.print("\tavg: ");
             Serial.print(sensors[s].historyAvg);
             Serial.print("\ttrend: ");
-            if ( sensors[s].trend ) { Serial.println("+"); } else { Serial.println("-"); }
+            if ( sensors[s].trend > 0 ) { Serial.println("+"); } else if ( sensors[s].trend < 0 ) { Serial.println("-"); } else { Serial.println("~"); }
         }
         for ( int st = 0; st < stageCount; st++ ) {
             Serial.print("stage ");
