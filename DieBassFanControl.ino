@@ -17,87 +17,87 @@
 // initiate bus on defined pin
 OneWire wire_heat(bus_heat);
 // tell dallas lib on wich bus the temperature sensors are located
-DallasTemperature sensors(&wire_heat);
-
-// set temperature thresholds
-const int tempZone1 = 30; // Temperature that is considered as cool     - Trigger to stop all Fans
-const int tempZone2 = 35; // Temperature that is considered as normal
-const int tempZone3 = 45; // Temperature that is considered as critical - Trigger to max out all Fans
+DallasTemperature sensorBus(&wire_heat);
 
 // define how many Temperature measurements we will remember
-const int tempHistoryLength = 5;
+const int sensorHistorySize = 5;
 
 // define how many temerature sensors we are going to use with OneWire
-const int tempSensorCount = 2;
+const int sensorCount = 2;
 
-// define temperature sensor history
-int temperature[tempSensorCount][tempHistoryLength];
-
-// initiate the array to store the counter in which indicates the consecutive occurences of measuring errors or measured values that can not be true
-int tempMeasureErrorCount[tempSensorCount] = {};
+// define the strcut that defines a sensor
+struct Sensor {
+    int current;
+    int history[sensorHistorySize];
+    int error;
+    int historyAvg;
+    bool trend;
+};
+// declare the list that stores al sensors
+struct Sensor sensors[sensorCount];
 
 // define the amount of bad measurements that are considered as bad
 // reaching this limit means that cooling can not be ensured as the temperature is unknown
 // this will result in a 'last resort' action and turn on the FANs to the max level
-const int tempMeasureErrorCountLimit = 4;
+const int sensorErrorLimit = 4;
 
-// define the variable to store the highes measured value for every loop
-int tempMeasuredMax;
+// set the Pin for the led to indicate that the sensorErrorLimit got hit
+const int sensorErrorLimitLed = 24;
+
+/* ##############
+   ### STAGES ###
+   ############## */
+// set temperature stages an the pin for the indicator LED
+const int stageSetup[][2] = { { 30, 20 }, { 35, 21 }, { 45, 22 }, { 47, 23 } };
+// count the amount of stages. basicaly just for coding conviniece
+const int stageCount = sizeof(stageSetup) / sizeof(stageSetup[0]);
+
+// define the Pin for the LED which gets turned on on case the critial limit (last stage) gets activated
+const int critialLedPin = 10;
+
+// define struct that defines a stage
+struct Stage {
+    bool active;
+    int trigger;
+    int ledPin;
+};
+// declare the list that stores all stages
+struct Stage stages[stageCount];
 
 /* ####################
    ### FAN CONRTROL ###
    #################### */
-// Defines the structure for multiple fans and their dividers
-typedef struct{
-  char fantype;
-  unsigned int fandiv;
-}fanspec;
 
-// Definitions of the fans
-fanspec fanspace[3]={{0,1},{1,2},{2,8}};
+/* this is the fan setup. every entry represents one Fan.
+   syntax: { PIN primary Fan, PIN secodary Fan, stage mapping } */
+const int fanSetup[][3] = {
+    { 6, 0, 1 },
+    { 7, 0, 2 },
+    { 8, 0, 3 }
+};
 
-/*
-define and initialize values for Fan meassuring and conrolling
-FanPinPWM     : set the Pin the PWM Pin is connected (yellow cable)
-FanPinSensor  : set the Pin the Hallsensor is connected (blue cable)
-FanSensorType : is used to select the devider for RPM calculations
-                * 1 for unipole hall effect sensor
-                * 2 for bipole hall effect sensor
-FanSensorMap  : associate the FAN with a sensor. Means that the FAN speed will change depending on the temperature of the sensor
-FanZoneMap    : 
-FanPWMValue   : the PWM value set on the PWM pin (FanPinPWM). The values set here are just inital values
+const int fanCount = sizeof(fanSetup) / sizeof(fanSetup[0]);
 
-
-define 3 Zones. every Zone represent a set of Fans. The Zones are used as Stages to group FANs together.
-Zone 1 might run much earlier than Zone 2 for eg.*/
-const int FanType           = 1;
-const int FanZonePinPWM[3][2] = { { 6, 7 }, { 8, 44 }, { 45, 46 } };
-// const int FanZoneCount      = sizeof(FanZonePinPWM) / sizeof(int);
-const int FanZoneCount      = 3;
-
-      int FanZonePWMValue[FanZoneCount];
-
-// define the array to store the amount of fans for every zone in with the fixed length of the amount of zone
-int FanZoneFanCount[FanZoneCount];
-
-
-
-
-// const int FanPinPWM[] =         {  6,  7,  8, 44, 45 };
-// const int FanSensorType[] =     {  1,  1,  1,  1,  1 };
-// const int FanZoneMap[] =        {  0,  0,  1,  1,  2 };
-//       int FanPWMValue[] =       { 20, 20, 20, 20, 20 };
-
-// calculate the amount of Fans in this setup
-// const int FanCount = sizeof(FanPinSensor) / sizeof(int);
+// define the struct that defines a fan
+struct Fan {
+    int pinPri;
+    int pinSec ;
+    int pwmValuePri;
+    int pwmValueSec;
+    int stage;
+    bool active;
+};
+// define the list to store all fans in
+struct Fan fans[fanCount];
 
 // define the maximum PWM value that can be set (usually 255)
 const int MaxPWM = 255;
 // define the minimum PWM value that can be set
 const int MinPWM = 20;
-
 // define the steps to adjuste the PWM value
 const int PWMStep = 25;
+// define an offset for the primary and secondary fans if the fan has 2 rotors
+const int dualFanOffset = 50;
 
 /*
 =================
@@ -106,47 +106,49 @@ const int PWMStep = 25;
 */
 bool temperatureInitialize () {
     // Send the command to get temperatures
-    sensors.requestTemperatures();
+    sensorBus.requestTemperatures();
 
     // define a bool which will be the return vaule of this function
-    // it true by default and gets set to false when ANY inital sensor reading fails to inform the setup function of it. 
+    // it true by default and gets set to false when ANY inital sensor reading fails to inform the setup function of it.
     bool checkState = true;
 
     // collect temperatures
-    for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
+    for ( int s = 0; s < sensorCount; s++ ) {
 
         int x = 0;
-        bool SensorCheckOK = false;
-        while ( !SensorCheckOK && x < 5 ) {
+        bool sensorState = true;
+        for ( int x = 0; x <= 5; x++ ) {
             // store measured temperature in a temporary place
-            int tempMeasured = (int)sensors.getTempCByIndex(sensor);
+            int tempMeasured = (int)sensorBus.getTempCByIndex(s);
 
             // catch measuring errors
             if ( tempMeasured > -100 ) {
-                for ( int a = 0; a < tempHistoryLength; a++ ) {
-                    temperature[sensor][a] = tempMeasured;
+                sensors[s].current = tempMeasured;
+                for ( int h = 0; h < sensorHistorySize; h++ ) {
+                    sensors[s].history[h] = tempMeasured;
                 }
-                SensorCheckOK = true;
                 #ifdef DEBUG
                     Serial.print("init sensor ");
-                    Serial.print(sensor);
+                    Serial.print(s);
                     Serial.print(" OK - ");
                     Serial.println(tempMeasured);
                 #endif
+                break;
             } else {
-                x++;
+                sensorBus.requestTemperatures();
                 #ifdef DEBUG
                     Serial.print("init sensor ");
-                    Serial.print(sensor);
+                    Serial.print(s);
                     Serial.print(" FAIL (cnt ");
                     Serial.print(x);
-                    Serial.print(" ) - ");
+                    Serial.print(") - ");
                     Serial.println(tempMeasured);
                 #endif
             }
             // set the bool to false to notify the setup function that a sensor has a failure during init
-            if ( x = 5 ) { checkState = false; }
+            if ( x == 5 ) { checkState = false; }
         }
+
     }
     // returns false if
     return checkState;
@@ -155,215 +157,188 @@ bool temperatureInitialize () {
 
 void getTemperature () {
     // Send the command to get temperatures
-    sensors.requestTemperatures();
+    sensorBus.requestTemperatures();
 
-    // preserve historical measurements
-    for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
-        for ( int b = tempHistoryLength - 1; b >= 1; b-- ) {
-            temperature[sensor][b] = temperature[sensor][b - 1];
+    for ( int s = 0; s < sensorCount; s++ ) {
+        // preserve historical measurements
+        for ( int h = sensorHistorySize - 1; h >= 1; h-- ) {
+            sensors[s].history[h] = sensors[s].history[h - 1];
         }
-    }
-
-    // clear Variable to store the highest measured Temperature
-    // this serves as value to check if we hit any thresholds
-    tempMeasuredMax = 0;
-
-    // collect temperatures
-    for( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
+        // make last measurement the most recent history entry
+        sensors[s].history[0] = sensors[s].current;
 
         // store measured temperature in a temporary place
-        int tempMeasured = (int)sensors.getTempCByIndex(sensor);
-
-        // check if we have a new measuredMax temperature
-        if ( tempMeasuredMax < tempMeasured ) {
-            tempMeasuredMax = tempMeasured;
-            #ifdef DEBUG
-                Serial.print("new measured max: ");
-                Serial.println(tempMeasuredMax);
-            #endif
-        }
-
-        // calculate the difference to the last measured value
-        int tempDif = tempMeasured - temperature[sensor][0];
+        int measurement = (int)sensorBus.getTempCByIndex(s);
+        
+        // calculate the difference to the previous measured value
+        int difference = measurement - sensors[s].history[0];
 
         // catch measuring errors
-        if ( tempMeasured > -100 && tempDif < 25 && tempDif > -25 ) {
-            temperature[sensor][0] = tempMeasured;
-            tempMeasureErrorCount[sensor] = 0;
+        if ( measurement > -100 && difference < 25 && difference > -25 ) {
+            sensors[s].current = measurement;
+            sensors[s].error = 0;
         } else {
-            tempMeasureErrorCount[sensor]++;
-        }
-
-        #ifdef DEBUG
-            Serial.print("temp measured on ");
-            Serial.print(sensor);
-            Serial.print(" ");
-            Serial.println(tempMeasured);
-        #endif
-    }
-}
-
-void calcPWM () {
-    // detect if temp is in or de-creasing
-    for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
-
-        // define a variable to store the sum of all temperatures in
-        int tempAll = 0;
-
-        // summarise all historical temeratures 
-        for ( int a = 1; a < tempHistoryLength; a++ ) {
-            tempAll = tempAll + temperature[sensor][a];
-        }
-
-        // calculate average from those
-        int tempAvg = tempAll / ( tempHistoryLength - 1 );
-        int tempAvgDif = temperature[sensor][0] - tempAvg;
-
-        // decide if PWM need adjustment to in-/decrease cooling
-        if ( tempAvgDif >= 0 ) {
-            // temperature is increasing or the same
-            adjustPWM(true);
-        } else {
-            // temperature is decreasing
-            adjustPWM(false);
-        }
-
-    }
-}
-
-// adjuste the current PWM Value to adjust the FAN speed
-// preserve the defined Min/Max limits 
-void adjustPWM(bool increase) {
-    // find FANs which are mapped to the defined sensor
-    for ( int b = 0; b < FanZoneCount; b++ ) {
-        if ( increase ) {
-            FanZonePWMValue[b] = FanZonePWMValue[b] + PWMStep;
-            #ifdef DEBUG
-                Serial.print("+ pwn in zone ");
-                Serial.print(b);
-                Serial.print(" to ");
-                Serial.println(FanZonePWMValue[b]);
-            #endif
-        } else {
-            FanZonePWMValue[b] = FanZonePWMValue[b] - PWMStep;
-            #ifdef DEBUG
-                Serial.print("- pwn in zone ");
-                Serial.print(b);
-                Serial.print(" to ");
-                Serial.println(FanZonePWMValue[b]);
-            #endif
-        }
-
-        // check if the new PWM Value meets the Min/Max
-        if ( FanZonePWMValue[b] > MaxPWM ) {
-            FanZonePWMValue[b] = MaxPWM;
-        } else if ( FanZonePWMValue[b] < MinPWM ) {
-            FanZonePWMValue[b] = MinPWM;
+            sensors[s].error++;
         }
     }
 }
 
-void checkThresholds () {
-    // check for Zone 1
-    // 120mm fans
-    // i fthreshold is true, zone 1 will start if not running
-    // tempertature under threshold, power off zone 1 if running
-    if ( tempMeasuredMax >= tempZone1 && FanZonePWMValue[0] < MinPWM ) {
-        FanZonePWMValue[0] = MinPWM;
-        #ifdef DEBUG
-            Serial.print("power on: zone 1 - temp: ");
-            Serial.println(tempMeasuredMax);
-        #endif
-    } else if ( tempMeasuredMax < tempZone1 && FanZonePWMValue[0] > 0 ) {
-        FanZonePWMValue[0] = 0;
-        #ifdef DEBUG
-            Serial.print("power off: zone 1 - temp: ");
-            Serial.println(tempMeasuredMax);
-        #endif
-    }
+// void calcPWM () {
+//     // detect if temp is in or de-creasing
+//     for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
 
-    // check for zone 2
-    // 2x 80mm fans
-    // if threshold is true, zone2 will start if not running already
-    // temperatrue under threshold, power off zone 2 if running
-    if ( tempMeasuredMax >= tempZone2 && FanZonePWMValue[1] < MinPWM ) {
-        FanZonePWMValue[1] = MinPWM;
-        #ifdef DEBUG
-            Serial.print("power on: zone 2 - temp: ");
-            Serial.println(tempMeasuredMax);
-        #endif
-    } else if ( tempMeasuredMax < tempZone2 && FanZonePWMValue[1] > 0) {
-        #ifdef DEBUG
-            Serial.print("power off: zone 2 - temp: ");
-            Serial.println(tempMeasuredMax);
-        #endif
-        FanZonePWMValue[1] = 0;
-    }
+//         // define a variable to store the sum of all temperatures in
+//         int tempAll = 0;
 
-    // check for zone 3
-    // all fans
-    // if threshod is true, all fans max RPM
-    // temperature is under thresold, power off zone 3, if runnning
-    if ( tempMeasuredMax >= tempZone3 ) {
-        for ( int a = 0; a > FanZoneCount; a++ ) {
-            FanZonePWMValue[a] = MaxPWM;
-        }
-        #ifdef DEBUG    
-            Serial.print("power on: zone 3 - temp: ");
-            Serial.println(tempMeasuredMax);
-        #endif
-    } else if ( tempMeasuredMax < tempZone3 && FanZonePWMValue > 0 ) {
-        #ifdef DEBUG
-            Serial.print("power off: zone 3 - temp: ");
-            Serial.println(tempMeasuredMax);
-        #endif
-        FanZonePWMValue[2] = 0;
-    }
-}
+//         // summarise all historical temeratures
+//         for ( int a = 1; a < tempHistoryLength; a++ ) {
+//             tempAll = tempAll + temperature[sensor][a];
+//         }
 
-void checkError() {
-    // bool to detect if any sensor has an failed state
-    bool hasError = false;
+//         // calculate average from those
+//         int tempAvg = tempAll / ( tempHistoryLength - 1 );
+//         int tempAvgDif = temperature[sensor][0] - tempAvg;
 
-    for ( int a = 0; a < tempSensorCount; a++ ) {
-        if ( tempMeasureErrorCount[a] >= tempMeasureErrorCountLimit ) {
-            hasError = true;
-            for ( int a = 0; a < FanZoneCount; a++ ) {
-                FanZonePWMValue[a] = MaxPWM;
-            }
-        }
-    }
-    if ( hasError ) {
-        // turn on onboard led to show this state externaly
-        digitalWrite(LED_BUILTIN, HIGH);
-        #ifdef DEBUG
-            Serial.print("error count ");
-            for ( int a = 0; a < tempSensorCount; a++ ) {
-                Serial.print(tempMeasureErrorCount[a]);
-                Serial.print(" ");
-            }
-            Serial.println();
-        #endif
-    } else {
-        // turn off onboard led to show state is ok
-        digitalWrite(LED_BUILTIN, LOW);
-        #ifdef DEBUG
-            Serial.println("cleared error state");
-        #endif
-    }
-}
+//         // decide if PWM need adjustment to in-/decrease cooling
+//         if ( tempAvgDif >= 0 ) {
+//             // temperature is increasing or the same
+//             adjustPWM(true);
+//         } else {
+//             // temperature is decreasing
+//             adjustPWM(false);
+//         }
+
+//     }
+// }
+
+// // adjuste the current PWM Value to adjust the FAN speed
+// // preserve the defined Min/Max limits
+// void adjustPWM(bool increase) {
+//     // find FANs which are mapped to the defined sensor
+//     for ( int b = 0; b < FanZoneCount; b++ ) {
+//         if ( increase ) {
+//             FanZonePWMValue[b] = FanZonePWMValue[b] + PWMStep;
+//             #ifdef DEBUG
+//                 Serial.print("+ pwn in zone ");
+//                 Serial.print(b);
+//                 Serial.print(" to ");
+//                 Serial.println(FanZonePWMValue[b]);
+//             #endif
+//         } else {
+//             FanZonePWMValue[b] = FanZonePWMValue[b] - PWMStep;
+//             #ifdef DEBUG
+//                 Serial.print("- pwn in zone ");
+//                 Serial.print(b);
+//                 Serial.print(" to ");
+//                 Serial.println(FanZonePWMValue[b]);
+//             #endif
+//         }
+
+//         // check if the new PWM Value meets the Min/Max
+//         if ( FanZonePWMValue[b] > MaxPWM ) {
+//             FanZonePWMValue[b] = MaxPWM;
+//         } else if ( FanZonePWMValue[b] < MinPWM ) {
+//             FanZonePWMValue[b] = MinPWM;
+//         }
+//     }
+// }
+
+// void checkThresholds () {
+//     // check for Zone 1
+//     // 120mm fans
+//     // i fthreshold is true, zone 1 will start if not running
+//     // tempertature under threshold, power off zone 1 if running
+//     if ( tempMeasuredMax >= tempZone1 && FanZonePWMValue[0] < MinPWM ) {
+//         FanZonePWMValue[0] = MinPWM;
+//         #ifdef DEBUG
+//             Serial.print("power on: zone 1 - temp: ");
+//             Serial.println(tempMeasuredMax);
+//         #endif
+//     } else if ( tempMeasuredMax < tempZone1 && FanZonePWMValue[0] > 0 ) {
+//         FanZonePWMValue[0] = 0;
+//         #ifdef DEBUG
+//             Serial.print("power off: zone 1 - temp: ");
+//             Serial.println(tempMeasuredMax);
+//         #endif
+//     }
+
+//     // check for zone 2
+//     // 2x 80mm fans
+//     // if threshold is true, zone2 will start if not running already
+//     // temperatrue under threshold, power off zone 2 if running
+//     if ( tempMeasuredMax >= tempZone2 && FanZonePWMValue[1] < MinPWM ) {
+//         FanZonePWMValue[1] = MinPWM;
+//         #ifdef DEBUG
+//             Serial.print("power on: zone 2 - temp: ");
+//             Serial.println(tempMeasuredMax);
+//         #endif
+//     } else if ( tempMeasuredMax < tempZone2 && FanZonePWMValue[1] > 0) {
+//         #ifdef DEBUG
+//             Serial.print("power off: zone 2 - temp: ");
+//             Serial.println(tempMeasuredMax);
+//         #endif
+//         FanZonePWMValue[1] = 0;
+//     }
+
+//     // check for zone 3
+//     // all fans
+//     // if threshod is true, all fans max RPM
+//     // temperature is under thresold, power off zone 3, if runnning
+//     if ( tempMeasuredMax >= tempZone3 ) {
+//         for ( int a = 0; a > FanZoneCount; a++ ) {
+//             FanZonePWMValue[a] = MaxPWM;
+//         }
+//         #ifdef DEBUG
+//             Serial.print("power on: zone 3 - temp: ");
+//             Serial.println(tempMeasuredMax);
+//         #endif
+//     } else if ( tempMeasuredMax < tempZone3 && FanZonePWMValue > 0 ) {
+//         #ifdef DEBUG
+//             Serial.print("power off: zone 3 - temp: ");
+//             Serial.println(tempMeasuredMax);
+//         #endif
+//         FanZonePWMValue[2] = 0;
+//     }
+// }
+
+// void checkError() {
+//     // bool to detect if any sensor has an failed state
+//     bool hasError = false;
+
+//     for ( int a = 0; a < tempSensorCount; a++ ) {
+//         if ( tempMeasureErrorCount[a] >= tempMeasureErrorCountLimit ) {
+//             hasError = true;
+//             for ( int a = 0; a < FanZoneCount; a++ ) {
+//                 FanZonePWMValue[a] = MaxPWM;
+//             }
+//         }
+//     }
+//     if ( hasError ) {
+//         // turn on onboard led to show this state externaly
+//         digitalWrite(LED_BUILTIN, HIGH);
+//         #ifdef DEBUG
+//             Serial.print("error count ");
+//             for ( int a = 0; a < tempSensorCount; a++ ) {
+//                 Serial.print(tempMeasureErrorCount[a]);
+//                 Serial.print(" ");
+//             }
+//             Serial.println();
+//         #endif
+//     } else {
+//         // turn off onboard led to show state is ok
+//         digitalWrite(LED_BUILTIN, LOW);
+//         #ifdef DEBUG
+//             Serial.println("cleared error state");
+//         #endif
+//     }
+// }
 
 void writePWM() {
     // write the PWM value to the Fan Pins
-    for ( int zone = 0; zone < FanZoneCount; zone++ ) {
-        for ( int fan = 0; fan < FanZoneFanCount[zone]; fan++ ) {
-            analogWrite( FanZonePinPWM[zone][fan], FanZonePWMValue[zone] );                        
-            #ifdef DEBUG
-                Serial.print("pwm value pin ");
-                Serial.println(FanZonePinPWM[zone][fan]);
-                Serial.print("pwm value ");
-                Serial.println(FanZonePWMValue[zone]);
-            #endif
+    for ( int f = 0; f < fanCount; f++ ) {
+        analogWrite( fans[f].pinPri, fans[f].pwmValuePri );
+        if ( fans[f].pinSec != 0 ) {
+            analogWrite( fans[f].pinSec, fans[f].pwmValueSec );
         }
     }
 }
@@ -377,30 +352,52 @@ void setup() {
     #ifdef DEBUG
         // setup Serial
         Serial.begin(9600);
-        Serial.println("SETUP >>>>>");
+        Serial.println("SETUP\t>>>>>");
     #endif
 
-    // count amount of fans in the zones
-    for ( int zone = 0; zone < FanZoneCount; zone++ ) {
-        FanZoneFanCount[zone] = sizeof(FanZonePinPWM[zone]) / sizeof(int);
+    // build the list of all configured fans
+    for ( int f = 0; f < fanCount; f++ ) {
+        fans[f].pinPri      = fanSetup[f][0];
+        fans[f].pinSec      = fanSetup[f][1];
+        fans[f].stage       = fanSetup[f][2];
+        fans[f].pwmValuePri = 0;
+        fans[f].pwmValueSec = 0;
+        fans[f].active      = false;
+
+        // set pin modes for fan
+        pinMode( fans[f].pinPri, OUTPUT );
+        if ( fans[f].pinSec != 0 ) {
+            pinMode( fans[f].pinSec, OUTPUT );
+        }
+    }
+
+    // build the list of all configured sensors
+    for ( int s = 0; s < sensorCount; s++ ) {
+        sensors[s].current    = 0;
+        sensors[s].error      = 0;
+        sensors[s].historyAvg = 0;
+        sensors[s].trend      = false;
+        for ( int h = 0; h < sensorHistorySize; h++ ) {
+            sensors[s].history[h] = 0;
+        }
+    }
+
+    // build the list of all configured stages
+    for ( int st = 0; st < stageCount; st++ ) {
+        stages[st].active  = false;
+        stages[st].trigger = stageSetup[st][0];
+        stages[st].ledPin  = stageSetup[st][1];
     }
 
     // initiate temperature sensors
-    sensors.begin();
+    sensorBus.begin();
 
     // modify PWM regeister to change PWM freq
     // set PWM freq to 31kHz (31372.55 Hz) on ...
-//  TCCR3B = TCCR3B & B11111000 | B00000001; // ... Pins D2  D3  D5
+    TCCR3B = TCCR3B & B11111000 | B00000001; // ... Pins D2  D3  D5
     TCCR4B = TCCR4B & B11111000 | B00000001; // ... Pins D6  D7  D8
     TCCR5B = TCCR5B & B11111000 | B00000001; // ... Pins D44 D45 D46
 
-    // set Pin modes ...
-    for ( int zone = 0; zone < FanZoneCount; zone++ ) {
-        for ( int fan = 0; fan < FanZoneFanCount[zone]; fan++ ) {
-            pinMode( FanZonePinPWM[zone][fan], OUTPUT);
-        }
-    }
-    
     // use the internal LED to show active 'last resort' state
     pinMode(LED_BUILTIN, OUTPUT);
 
@@ -410,8 +407,8 @@ void setup() {
     if ( temperatureInitialize() ) {
         // temp init successfull
         // blink at start to show successfull end of setup
-        int state = HIGH; 
-        for( int a = 0; a = 10; a++ ) {
+        bool state = HIGH;
+        for( int a = 0; a < 10; a++ ) {
             digitalWrite(LED_BUILTIN, state);
             state = state ? LOW: HIGH;
             delay(1000);
@@ -421,7 +418,7 @@ void setup() {
     }
 
     #ifdef DEBUG
-        Serial.println(">>>>> END");
+        Serial.println(">>>>>\tEND");
     #endif
 
 }
@@ -436,60 +433,63 @@ void loop () {
     // get temperatures from sensors
     getTemperature();
 
-    // calc the new PWM values based on tmerature changes
-    calcPWM();
+    // // calc the new PWM values based on tmerature changes
+    // calcPWM();
 
-    // check if one of the tempMeasuredMax hit any defined threshold
-    checkThresholds();
+    // // check if one of the tempMeasuredMax hit any defined threshold
+    // checkThresholds();
 
-    // check for measurement errors. if the threshold of the number of errors in a row is hit, enter a 'last resort' state and turn all fans to maximum
-    // this will overwrite all previously calculated values
-    checkError();
+    // // check for measurement errors. if the threshold of the number of errors in a row is hit, enter a 'last resort' state and turn all fans to maximum
+    // // this will overwrite all previously calculated values
+    // checkError();
+
+    brain();
 
     // write the pwm values to the pins
     writePWM();
 
     #ifdef DEBUG
-        for ( int sensor = 0; sensor < tempSensorCount; sensor++ ) {
-            Serial.print("temps of sensor ");
-            Serial.print(sensor);
-            Serial.print(" :");
-            for ( int a = 0; a < tempHistoryLength; a++ ) {
-                Serial.print(" ");
-                Serial.print(temperature[sensor][a]);
-            }
-            Serial.println();
+        for ( int f = 0; f < fanCount; f++ ){
+            Serial.print("fan ");
+            Serial.print(f);
+            Serial.print("\tpin1: ");
+            Serial.print(fans[f].pinPri);
+            Serial.print("\tpin2: ");
+            Serial.print(fans[f].pinSec);
+            Serial.print("\tpwm1: ");
+            Serial.print(fans[f].pwmValuePri);
+            Serial.print("\tpwm2: ");
+            Serial.print(fans[f].pwmValueSec);
+            Serial.print("\tstage: ");
+            Serial.println(fans[f].stage);
         }
-        Serial.println("==============================================");
+        for ( int s = 0; s < sensorCount; s++ ) {
+            Serial.print("sensor ");
+            Serial.print(s);
+            Serial.print("\tcurrent: ");
+            Serial.print(sensors[s].current);
+            Serial.print("\terror: ");
+            Serial.print(sensors[s].error);
+            Serial.print("\thistory: ");
+            for ( int h = 0; h < sensorHistorySize; h++ ) {
+                Serial.print("\t");
+                Serial.print(sensors[s].history[h]);
+            }
+            Serial.print("\tavg: ");
+            Serial.print(sensors[s].historyAvg);
+            Serial.print("\ttrend: ");
+            if ( sensors[s].trend ) { Serial.println("+"); } else { Serial.println("-"); }
+        }
+        for ( int st = 0; st < stageCount; st++ ) {
+            Serial.print("stage ");
+            Serial.print(st);
+            Serial.print("\tactive: ");
+            Serial.print(stages[st].active);
+            Serial.print("\ttrigger: ");
+            Serial.println(stages[st].trigger);
+        }
     #endif
 
     // delay loop to slow things down
     delay(2000);
-
-
-    /*
-    thoughs
-    atm, if the first sensor is raising the pmw because temp is = or +, but sensor 2 temp is - then it reverts the pwm change from sensor 1
-
-    so positive changes to the pwm are not allowed to be overruled.
-
-    remember the pwm values of every zone for ever sensor seperately.
-    after all sensors are processed and the new pwm values are calculated, compare them and find the highest value and set this value to the pins
-    because, if any sensor decides to raise the pwm it means that temperatrue is increasing or stayed equal, but we want it to decrease.
-
-    so any decreased pwm value is bad. unless all sensors decide to reducde pwm value. then it is ok.
-
-    and i think the same goes for the thresholds.
-
-
-    furthermore,
-    there is a logical error in handling the zones ( besides that zones should be renamed to stages )
-
-    rather than overwrite the pwm values when checking the thresholds, it should be checked if an adjustment of the pwm values is neccessary
-     at all. because, if the threshold for stage 1 is not hit, there is no reason to adjust the value.
-     same for all stages besides 3 as this threshold is the critical limit which turns on all fans on max value.
-
-    this still makes it necessary to avoid that the sensors overwrite the decission to raise a pwm value made by the previous one.
-    */
-
 }
