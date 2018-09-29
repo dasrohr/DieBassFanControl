@@ -1,10 +1,7 @@
 /* 
 this funciton is used to calculate the new pwm values for the fans
-
 as it has to make some decissions and cosider certain variables, i called it brain.
-
 */
-
 
 void brain() {
 
@@ -57,8 +54,10 @@ void brain() {
     // get the global trend of temperature
     int trend = getTemperatureTrend();
 
-    Serial.print("global trend: ");
-    Serial.println(trend);
+    #ifdef DEBUG
+        Serial.print("global trend: ");
+        Serial.println(trend);
+    #endif
 
     // check if stages are active and:
     //  - activate stopped fans
