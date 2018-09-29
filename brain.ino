@@ -43,11 +43,11 @@ void brain() {
         // decide wether the temperature is equal, in- or decreasing
         if ( sensors[s].historyAvg > sensors[s].current ) {
             // temperature is equal or increasing
-            sensors[s].trend = -1;   // negative means decresing
+            sensors[s].trend = 1;    // 1 means decresing
         } else if ( sensors[s].historyAvg < sensors[s].current ) {
-            sensors[s].trend = 1;    // positive means increasing
+            sensors[s].trend = 2;    // 2 means increasing
         } else {
-            sensors[s].trend = 0;    // zero means unchanged
+            sensors[s].trend = 0;    // 0 means unchanged
         }
     }
 
@@ -71,11 +71,11 @@ void brain() {
                 if ( fans[f].stage == st + 1 ){
                     // Fan is mapped to this stage
                     if ( fans[f].active ) {
-                        if ( trend > 0 ) {
-                            // trend is true, speed up
+                        if ( trend > 1 ) {
+                            // trend is grater 1, speed up
                             fans[f].pwmValuePri = fans[f].pwmValuePri + PWMStep;
-                        } else if ( trend < 0 ) {
-                            // trend is false, slow down
+                        } else if ( trend == 1 ) {
+                            // trend is 1, slow down
                             fans[f].pwmValuePri = fans[f].pwmValuePri - PWMStep;
                         }
                         if ( fans[f].pwmValuePri > MaxPWM ) { fans[f].pwmValuePri = MaxPWM; }   // ensure to not run over the MaxPWM value
@@ -134,7 +134,7 @@ int getHighestTemperature() {
 
 int getTemperatureTrend() {
     // check all sensors for trend = true. means temperature is increasing or equal to the historyAvg
-    int a = -1;
+    int a = 0;
     for ( int s = 0; s < sensorCount; s++ ) {
         if ( sensors[s].trend > a ) { a = sensors[s].trend; }
     }

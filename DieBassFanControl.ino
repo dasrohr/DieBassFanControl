@@ -478,7 +478,7 @@ void loop () {
             Serial.print("\tavg: ");
             Serial.print(sensors[s].historyAvg);
             Serial.print("\ttrend: ");
-            if ( sensors[s].trend > 0 ) { Serial.println("+"); } else if ( sensors[s].trend < 0 ) { Serial.println("-"); } else { Serial.println("~"); }
+            if ( sensors[s].trend > 1 ) { Serial.println("+"); } else if ( sensors[s].trend == 1u ) { Serial.println("-"); } else { Serial.println("~"); }
         }
         for ( int st = 0; st < stageCount; st++ ) {
             Serial.print("stage ");
