@@ -42,13 +42,13 @@ struct Sensor sensors[sensorCount];
 const int sensorErrorLimit = 4;
 
 // set the Pin for the led to indicate that the sensorErrorLimit got hit
-const int sensorErrorLimitLed = 24;
+const int sensorErrorLimitLed = 33;
 
 /* ##############
    ### STAGES ###
    ############## */
 // set temperature stages an the pin for the indicator LED
-const int stageSetup[][2] = { { 30, 20 }, { 35, 21 }, { 45, 22 }, { 47, 23 } };
+const int stageSetup[][2] = { { 30, 22 }, { 35, 24 }, { 45, 26 }, { 47, 36 } };
 // count the amount of stages. basicaly just for coding conviniece
 const int stageCount = sizeof(stageSetup) / sizeof(stageSetup[0]);
 
@@ -86,6 +86,17 @@ struct Fan {
 };
 // define the list to store all fans in
 struct Fan fans[fanCount];
+
+// define the struct to build a main power for the fans.
+// a mosfet is used to cut the power when no stage is active to power down fans that are not powering down with PWM value of 0
+// further: there is the option of an intrusion detection. the fans will stop when the case got opened. to prevent damage.
+struct MainPower {
+    bool state;
+    int pin;
+};
+struct MainPower mainPower;
+// set the pin the mosfet is connected to
+const int mainPowerPin = 10;
 
 // define the maximum PWM value that can be set (usually 255)
 const int MaxPWM = 255;
@@ -178,6 +189,36 @@ void getTemperature () {
     }
 }
 
+void setMainPower() {
+    bool a = false;
+    // if any stage is active, power on main power
+    for ( int st = 0; st < stageCount; st++ ) {
+        if ( stages[st].active && !mainPower.state ) { 
+            mainPower.state = true;
+            #ifdef DEBUG
+                Serial.println("powering ON main power");
+            #endif
+            digitalWrite( mainPower.pin, mainPower.state );
+            // delay when the power got turned on to let the fans settle
+            delay(5000);
+        }
+        // a is needed to determine if main power can be turned off
+        if ( stages[st].active ) { a = true; }
+    }
+    // if a did not reached true and main power is on, main power can turned off
+    if ( !a && mainPower.state ) { 
+        mainPower.state = false;
+        digitalWrite( mainPower.pin, mainPower.state );
+        #ifdef DEBUG
+            Serial.println("powering OFF main power");
+        #endif
+    }
+    #ifdef DEBUG
+        Serial.print("main power: ");
+        if ( mainPower.state ) { Serial.println("1"); } else { Serial.println("0"); }
+    #endif
+}
+
 void writePWM() {
     // write the PWM value to the Fan Pins
     for ( int f = 0; f < fanCount; f++ ) {
@@ -234,6 +275,10 @@ void setup() {
         stages[st].ledPin  = stageSetup[st][1];
     }
 
+    // setup the main power struct
+    mainPower.state = false;
+    mainPower.pin = mainPowerPin;
+
     // initiate temperature sensors
     sensorBus.begin();
 
@@ -243,11 +288,17 @@ void setup() {
     TCCR4B = TCCR4B & B11111000 | B00000001; // ... Pins D6  D7  D8
     TCCR5B = TCCR5B & B11111000 | B00000001; // ... Pins D44 D45 D46
 
-    // use the internal LED to show active 'last resort' state
+    // set pin modes
     pinMode(sensorErrorLimitLed, OUTPUT);
-
-    // turn of LED
+    pinMode(mainPower.pin, OUTPUT);
+    // set inital states
     digitalWrite(sensorErrorLimitLed, LOW);
+    digitalWrite(mainPower.pin, mainPower.state);
+
+    // turn on the main power once during setup
+    digitalWrite(mainPower.pin, HIGH);
+    delay(5000);
+    digitalWrite(mainPower.pin, LOW);
 
     if ( temperatureInitialize() ) {
         // temp init successfull
@@ -278,6 +329,9 @@ void loop () {
 
     // let the brain do its work
     brain();
+
+    // set the main power
+    setMainPower();
 
     // write the pwm values to the pins
     writePWM();

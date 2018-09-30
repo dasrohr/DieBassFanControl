@@ -11,7 +11,7 @@ void brain() {
         Serial.println(highestTemperature);
     #endif
 
-    // enable and disblae stages based on the highest temperature measured
+    // enable and disable stages based on the highest temperature measured
     for ( int st = 0; st < stageCount; st++ ) {
         if ( stages[st].trigger <= highestTemperature ) {
             stages[st].active = true;
