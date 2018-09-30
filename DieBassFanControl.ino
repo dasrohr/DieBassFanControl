@@ -68,8 +68,10 @@ struct Stage stages[stageCount];
 /* this is the fan setup. every entry represents one Fan.
    syntax: { PIN primary Fan, PIN secodary Fan, stage mapping } */
 const int fanSetup[][3] = {
-    { 6, 0, 1 },
-    { 7, 2, 2 },
+    { 2, 0, 1 },
+    { 3, 0, 1 },
+    { 5, 0, 2 },
+    { 7, 0, 2 },
     { 8, 0, 3 },
 };
 
