@@ -202,7 +202,7 @@ void setMainPower() {
             #endif
             changeMainPower();
             // delay when the power got turned on to let the fans settle
-            delay(5000);
+            delay(4500);
         }
         // a is needed to determine if main power can be turned off
         if ( stages[st].active ) { a = true; }
