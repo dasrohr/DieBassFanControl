@@ -77,7 +77,7 @@ const int fanSetup[][3] = {
 
 const int fanCount = sizeof(fanSetup) / sizeof(fanSetup[0]);
 
-// define the struct that defines a fan
+// define the struct that defines a Fan
 struct Fan {
     int pinPri;
     int pinSec ;
