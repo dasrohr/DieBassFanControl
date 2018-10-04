@@ -200,7 +200,7 @@ void setMainPower() {
             #ifdef DEBUG
                 Serial.println("powering ON main power");
             #endif
-            digitalWrite( mainPower.pin, mainPower.state );
+            changeMainPower();
             // delay when the power got turned on to let the fans settle
             delay(5000);
         }
@@ -210,15 +210,42 @@ void setMainPower() {
     // if a did not reached true and main power is on, main power can turned off
     if ( !a && mainPower.state ) { 
         mainPower.state = false;
-        digitalWrite( mainPower.pin, mainPower.state );
         #ifdef DEBUG
             Serial.println("powering OFF main power");
         #endif
+        changeMainPower();
     }
     #ifdef DEBUG
         Serial.print("main power: ");
         if ( mainPower.state ) { Serial.println("1"); } else { Serial.println("0"); }
     #endif
+}
+
+void changeMainPower() {
+    // turning the mainPower on and off instantly causes noise in the wires
+    // as the main power switch is a mosfet, turning it on slowly is a more elegant way and might reduce the noise caused when the current changes slower that way
+    int mainPowerValue;
+    int mainPowerValueTarget;
+    int mainPowerStep;
+    switch ( mainPower.state ) {
+        case true :
+            // true means mainPower is off, turn on
+            mainPowerValue = 0;
+            mainPowerValueTarget = 255;
+            mainPowerStep = 5;
+            break;
+        case false :
+            // false means mainPower is on, turn off
+            mainPowerValue = 255;
+            mainPowerValueTarget = 0;
+            mainPowerStep = -5;
+            break;
+    }
+    while ( mainPowerValue != mainPowerValueTarget ) {
+        digitalWrite(mainPower.pin, mainPowerValue);
+        mainPowerValue = mainPowerValue + mainPowerStep;
+        delay(15);  // 255 / 5 = 51 steps * 15 = 765ms for a full power up/down
+    }
 }
 
 void writePWM() {
@@ -230,6 +257,8 @@ void writePWM() {
         }
     }
 }
+
+
 
 /*
 =============
@@ -278,7 +307,7 @@ void setup() {
     }
 
     // setup the main power struct
-    mainPower.state = false;
+    mainPower.state = true;
     mainPower.pin = mainPowerPin;
 
     // initiate temperature sensors
@@ -295,12 +324,13 @@ void setup() {
     pinMode(mainPower.pin, OUTPUT);
     // set inital states
     digitalWrite(sensorErrorLimitLed, LOW);
-    digitalWrite(mainPower.pin, mainPower.state);
+    digitalWrite(mainPower.pin, LOW);
 
     // turn on the main power once during setup
-    digitalWrite(mainPower.pin, HIGH);
-    delay(5000);
-    digitalWrite(mainPower.pin, LOW);
+    changeMainPower();
+    delay(4500);
+    mainPower.state = false;
+    changeMainPower();
 
     if ( temperatureInitialize() ) {
         // temp init successfull
