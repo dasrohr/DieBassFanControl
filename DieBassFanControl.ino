@@ -68,11 +68,11 @@ struct Stage stages[stageCount];
 /* this is the fan setup. every entry represents one Fan.
    syntax: { PIN primary Fan, PIN secodary Fan, stage mapping } */
 const int fanSetup[][3] = {
-    { 2, 0, 1 },
-    { 3, 0, 1 },
-    { 5, 0, 2 },
-    { 7, 0, 2 },
-    { 8, 0, 3 },
+    { 47, 0, 1 },
+    { 45, 0, 1 },
+    {  6, 0, 2 },
+    { 44, 0, 2 },
+    { 46, 0, 3 },
 };
 
 const int fanCount = sizeof(fanSetup) / sizeof(fanSetup[0]);
@@ -380,6 +380,10 @@ void loop () {
         }
     #endif
 
-    // delay loop to slow things down
-    delay(20000);
+    #ifdef DEBUG
+        // delay loop to slow things down
+        delay(5000);
+    #else
+        delay(20000);
+    #endif
 }
